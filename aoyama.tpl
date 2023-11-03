@@ -4,7 +4,8 @@ config_opts['dist'] = 'uma{{ releasever }}'  # only useful for --resultdir varia
 config_opts['macros']['%dist'] = '.uma{{ releasever }}'
 config_opts['macros']['%ultramarine'] = '{{ releasever }}'
 config_opts['macros']['%toolchain'] = 'clang'
-config_opts['chroot_setup_cmd'] = 'install @buildsys-build'
+# Force musl to be used for all builds
+config_opts['macros']['%__cc'] = 'musl-clang'
 config_opts['buildroot_pkgs'] = 'ultramarine-release ultramarine-release-basic'
 config_opts['package_manager'] = 'dnf'
 config_opts['extra_chroot_dirs'] = [ '/run/lock', ]
