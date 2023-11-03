@@ -1,0 +1,69 @@
+# for each folder in anda/
+# generate a new workflow for each folder in anda/
+name: Automatically build packages
+on:
+  push:
+    paths:
+      - pkgs/**
+  workflow_dispatch:
+  workflow_call:
+
+jobs:
+  manifest:
+    runs-on: ubuntu-latest
+
+    outputs:
+      build_matrix: ${{ steps.generate_build_matrix.outputs.build_matrix }}
+    container:
+      image: ghcr.io/terrapkg/builder:f38
+      options: --cap-add=SYS_ADMIN --privileged
+    steps:
+      - name: Set workspace as safe
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      - name: Generate build matrix
+        id: generate_build_matrix
+        run: anda ci >> $GITHUB_OUTPUT
+  build:
+    needs: manifest
+    strategy:
+      matrix:
+        pkg: ${{ fromJson(needs.manifest.outputs.build_matrix) }}
+        version: ["38"]
+      fail-fast: false
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/terrapkg/builder:f38
+      options: --cap-add=SYS_ADMIN --privileged
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      - name: Set up git repository
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Cache buildroot
+        id: br-cache
+        uses: actions/cache@v3
+        with:
+          path: /var/cache
+          key: ${{ runner.os }}-br-${{ matrix.version }}-${{ matrix.pkg.arch }}
+
+      - name: Build with Andaman
+        run: anda build ${{ matrix.pkg.pkg }} --package rpm -c anda/mock-configs/terra-${{ matrix.version }}-${{ matrix.pkg.arch }}.cfg
+
+      - name: Generating artifact name
+        id: art
+        run: |
+          NAME=${{ matrix.pkg.pkg }}-${{ matrix.pkg.arch }}-${{ matrix.version }}
+          x=${NAME//\//@}
+          echo "name=$x" >> $GITHUB_OUTPUT
+
+      - uses: actions/upload-artifact@v3
+        with:
+          name: ${{ steps.art.outputs.name }}
+          path: anda-build/rpm/rpms/*
