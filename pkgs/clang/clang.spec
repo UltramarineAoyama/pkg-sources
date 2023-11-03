@@ -6,8 +6,6 @@
 
 %global toolchain clang
 
-# Opt out of https://fedoraproject.org/wiki/Changes/fno-omit-frame-pointer
-# https://bugzilla.redhat.com/show_bug.cgi?id=2158587
 %undefine _include_frame_pointers
 
 %bcond_with compat_build

@@ -4,13 +4,8 @@
 # Unlock LLVM Snapshot LUA functions
 %{llvm_sb}
 %endif
-
-# We are building with clang for faster/lower memory LTO builds.
-# See https://docs.fedoraproject.org/en-US/packaging-guidelines/#_compiler_macros
 %global toolchain clang
 
-# Opt out of https://fedoraproject.org/wiki/Changes/fno-omit-frame-pointer
-# https://bugzilla.redhat.com/show_bug.cgi?id=2158587
 %undefine _include_frame_pointers
 
 # Components enabled if supported by target architecture:
