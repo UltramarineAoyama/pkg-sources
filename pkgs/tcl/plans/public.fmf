@@ -1,0 +1,7 @@
+summary: Test plan with all Fedora tests
+discover:
+       how: fmf
+       url: https://src.fedoraproject.org/tests/tcl.git
+execute:
+       how: tmt
+

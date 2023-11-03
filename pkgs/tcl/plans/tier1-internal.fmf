@@ -1,0 +1,12 @@
+summary: CI plan, picks internal Tier1 tests, runs in beakerlib.
+discover:
+  - name: rhel
+    how: fmf
+    filter: 'tier: 1'
+    url: git://pkgs.devel.redhat.com/tests/tcl
+execute:
+    how: tmt 
+adjust:
+    enabled: false
+    when: distro == centos-stream, fedora
+    because: They don't have access to internal repos.
