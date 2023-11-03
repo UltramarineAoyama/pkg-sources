@@ -1,1 +1,1 @@
-# Project Aomori package sources
+# Project Aoyama package sources
