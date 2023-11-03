@@ -45,6 +45,8 @@ jobs:
           fetch-depth: 0
       - name: Set up git repository
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: deps
+        run: dnf install -y git moby-engine
 
       - name: Cache buildroot
         id: br-cache
