@@ -1,0 +1,298 @@
+commit ad4a5130277776d8f15f40ac5a6dede6ad3aabfb
+Author: Timm Bäder <tbaeder@redhat.com>
+Date:   Tue Aug 8 14:11:33 2023 +0200
+
+    [clang][CFG] Cleanup functions
+    
+    Add declarations declared with attribute(cleanup(...)) to the CFG,
+    similar to destructors.
+    
+    Differential Revision: https://reviews.llvm.org/D157385
+
+diff --git a/clang/include/clang/Analysis/CFG.h b/clang/include/clang/Analysis/CFG.h
+index cf4fa2da2a35..67383bb316d3 100644
+--- a/clang/include/clang/Analysis/CFG.h
++++ b/clang/include/clang/Analysis/CFG.h
+@@ -14,10 +14,11 @@
+ #ifndef LLVM_CLANG_ANALYSIS_CFG_H
+ #define LLVM_CLANG_ANALYSIS_CFG_H
+ 
+-#include "clang/Analysis/Support/BumpVector.h"
+-#include "clang/Analysis/ConstructionContext.h"
++#include "clang/AST/Attr.h"
+ #include "clang/AST/ExprCXX.h"
+ #include "clang/AST/ExprObjC.h"
++#include "clang/Analysis/ConstructionContext.h"
++#include "clang/Analysis/Support/BumpVector.h"
+ #include "clang/Basic/LLVM.h"
+ #include "llvm/ADT/DenseMap.h"
+ #include "llvm/ADT/GraphTraits.h"
+@@ -74,7 +75,8 @@ public:
+     MemberDtor,
+     TemporaryDtor,
+     DTOR_BEGIN = AutomaticObjectDtor,
+-    DTOR_END = TemporaryDtor
++    DTOR_END = TemporaryDtor,
++    CleanupFunction,
+   };
+ 
+ protected:
+@@ -383,6 +385,32 @@ private:
+   }
+ };
+ 
++class CFGCleanupFunction final : public CFGElement {
++public:
++  CFGCleanupFunction() = default;
++  CFGCleanupFunction(const VarDecl *VD)
++      : CFGElement(Kind::CleanupFunction, VD) {
++    assert(VD->hasAttr<CleanupAttr>());
++  }
++
++  const VarDecl *getVarDecl() const {
++    return static_cast<VarDecl *>(Data1.getPointer());
++  }
++
++  /// Returns the function to be called when cleaning up the var decl.
++  const FunctionDecl *getFunctionDecl() const {
++    const CleanupAttr *A = getVarDecl()->getAttr<CleanupAttr>();
++    return A->getFunctionDecl();
++  }
++
++private:
++  friend class CFGElement;
++
++  static bool isKind(const CFGElement E) {
++    return E.getKind() == Kind::CleanupFunction;
++  }
++};
++
+ /// Represents C++ object destructor implicitly generated for automatic object
+ /// or temporary bound to const reference at the point of leaving its local
+ /// scope.
+@@ -1142,6 +1170,10 @@ public:
+     Elements.push_back(CFGAutomaticObjDtor(VD, S), C);
+   }
+ 
++  void appendCleanupFunction(const VarDecl *VD, BumpVectorContext &C) {
++    Elements.push_back(CFGCleanupFunction(VD), C);
++  }
++
+   void appendLifetimeEnds(VarDecl *VD, Stmt *S, BumpVectorContext &C) {
+     Elements.push_back(CFGLifetimeEnds(VD, S), C);
+   }
+diff --git a/clang/lib/Analysis/CFG.cpp b/clang/lib/Analysis/CFG.cpp
+index b82f9010a83f..03ab4c6fdf29 100644
+--- a/clang/lib/Analysis/CFG.cpp
++++ b/clang/lib/Analysis/CFG.cpp
+@@ -881,6 +881,10 @@ private:
+     B->appendAutomaticObjDtor(VD, S, cfg->getBumpVectorContext());
+   }
+ 
++  void appendCleanupFunction(CFGBlock *B, VarDecl *VD) {
++    B->appendCleanupFunction(VD, cfg->getBumpVectorContext());
++  }
++
+   void appendLifetimeEnds(CFGBlock *B, VarDecl *VD, Stmt *S) {
+     B->appendLifetimeEnds(VD, S, cfg->getBumpVectorContext());
+   }
+@@ -1346,7 +1350,8 @@ private:
+     return {};
+   }
+ 
+-  bool hasTrivialDestructor(VarDecl *VD);
++  bool hasTrivialDestructor(const VarDecl *VD) const;
++  bool needsAutomaticDestruction(const VarDecl *VD) const;
+ };
+ 
+ } // namespace
+@@ -1861,14 +1866,14 @@ void CFGBuilder::addAutomaticObjDestruction(LocalScope::const_iterator B,
+   if (B == E)
+     return;
+ 
+-  SmallVector<VarDecl *, 10> DeclsNonTrivial;
+-  DeclsNonTrivial.reserve(B.distance(E));
++  SmallVector<VarDecl *, 10> DeclsNeedDestruction;
++  DeclsNeedDestruction.reserve(B.distance(E));
+ 
+   for (VarDecl* D : llvm::make_range(B, E))
+-    if (!hasTrivialDestructor(D))
+-      DeclsNonTrivial.push_back(D);
++    if (needsAutomaticDestruction(D))
++      DeclsNeedDestruction.push_back(D);
+ 
+-  for (VarDecl *VD : llvm::reverse(DeclsNonTrivial)) {
++  for (VarDecl *VD : llvm::reverse(DeclsNeedDestruction)) {
+     if (BuildOpts.AddImplicitDtors) {
+       // If this destructor is marked as a no-return destructor, we need to
+       // create a new block for the destructor which does not have as a
+@@ -1879,7 +1884,8 @@ void CFGBuilder::addAutomaticObjDestruction(LocalScope::const_iterator B,
+         Ty = getReferenceInitTemporaryType(VD->getInit());
+       Ty = Context->getBaseElementType(Ty);
+ 
+-      if (Ty->getAsCXXRecordDecl()->isAnyDestructorNoReturn())
++      const CXXRecordDecl *CRD = Ty->getAsCXXRecordDecl();
++      if (CRD && CRD->isAnyDestructorNoReturn())
+         Block = createNoReturnBlock();
+     }
+ 
+@@ -1890,8 +1896,10 @@ void CFGBuilder::addAutomaticObjDestruction(LocalScope::const_iterator B,
+     // objects, we end lifetime with scope end.
+     if (BuildOpts.AddLifetime)
+       appendLifetimeEnds(Block, VD, S);
+-    if (BuildOpts.AddImplicitDtors)
++    if (BuildOpts.AddImplicitDtors && !hasTrivialDestructor(VD))
+       appendAutomaticObjDtor(Block, VD, S);
++    if (VD->hasAttr<CleanupAttr>())
++      appendCleanupFunction(Block, VD);
+   }
+ }
+ 
+@@ -1922,7 +1930,7 @@ void CFGBuilder::addScopeExitHandling(LocalScope::const_iterator B,
+   // is destroyed, for automatic variables, this happens when the end of the
+   // scope is added.
+   for (VarDecl* D : llvm::make_range(B, E))
+-    if (hasTrivialDestructor(D))
++    if (!needsAutomaticDestruction(D))
+       DeclsTrivial.push_back(D);
+ 
+   if (DeclsTrivial.empty())
+@@ -2095,7 +2103,11 @@ LocalScope* CFGBuilder::addLocalScopeForDeclStmt(DeclStmt *DS,
+   return Scope;
+ }
+ 
+-bool CFGBuilder::hasTrivialDestructor(VarDecl *VD) {
++bool CFGBuilder::needsAutomaticDestruction(const VarDecl *VD) const {
++  return !hasTrivialDestructor(VD) || VD->hasAttr<CleanupAttr>();
++}
++
++bool CFGBuilder::hasTrivialDestructor(const VarDecl *VD) const {
+   // Check for const references bound to temporary. Set type to pointee.
+   QualType QT = VD->getType();
+   if (QT->isReferenceType()) {
+@@ -2149,7 +2161,7 @@ LocalScope* CFGBuilder::addLocalScopeForVarDecl(VarDecl *VD,
+     return Scope;
+ 
+   if (!BuildOpts.AddLifetime && !BuildOpts.AddScopes &&
+-      hasTrivialDestructor(VD)) {
++      !needsAutomaticDestruction(VD)) {
+     assert(BuildOpts.AddImplicitDtors);
+     return Scope;
+   }
+@@ -5287,6 +5299,7 @@ CFGImplicitDtor::getDestructorDecl(ASTContext &astContext) const {
+     case CFGElement::CXXRecordTypedCall:
+     case CFGElement::ScopeBegin:
+     case CFGElement::ScopeEnd:
++    case CFGElement::CleanupFunction:
+       llvm_unreachable("getDestructorDecl should only be used with "
+                        "ImplicitDtors");
+     case CFGElement::AutomaticObjectDtor: {
+@@ -5830,6 +5843,11 @@ static void print_elem(raw_ostream &OS, StmtPrinterHelper &Helper,
+     break;
+   }
+ 
++  case CFGElement::Kind::CleanupFunction:
++    OS << "CleanupFunction ("
++       << E.castAs<CFGCleanupFunction>().getFunctionDecl()->getName() << ")\n";
++    break;
++
+   case CFGElement::Kind::LifetimeEnds:
+     Helper.handleDecl(E.castAs<CFGLifetimeEnds>().getVarDecl(), OS);
+     OS << " (Lifetime ends)\n";
+diff --git a/clang/lib/Analysis/PathDiagnostic.cpp b/clang/lib/Analysis/PathDiagnostic.cpp
+index 348afc42319e..0cb03943c547 100644
+--- a/clang/lib/Analysis/PathDiagnostic.cpp
++++ b/clang/lib/Analysis/PathDiagnostic.cpp
+@@ -567,6 +567,7 @@ getLocationForCaller(const StackFrameContext *SFC,
+   }
+   case CFGElement::ScopeBegin:
+   case CFGElement::ScopeEnd:
++  case CFGElement::CleanupFunction:
+     llvm_unreachable("not yet implemented!");
+   case CFGElement::LifetimeEnds:
+   case CFGElement::LoopExit:
+diff --git a/clang/lib/StaticAnalyzer/Core/ExprEngine.cpp b/clang/lib/StaticAnalyzer/Core/ExprEngine.cpp
+index 0e2ac78f7089..d7c5bd1d4042 100644
+--- a/clang/lib/StaticAnalyzer/Core/ExprEngine.cpp
++++ b/clang/lib/StaticAnalyzer/Core/ExprEngine.cpp
+@@ -993,6 +993,7 @@ void ExprEngine::processCFGElement(const CFGElement E, ExplodedNode *Pred,
+       ProcessLoopExit(E.castAs<CFGLoopExit>().getLoopStmt(), Pred);
+       return;
+     case CFGElement::LifetimeEnds:
++    case CFGElement::CleanupFunction:
+     case CFGElement::ScopeBegin:
+     case CFGElement::ScopeEnd:
+       return;
+diff --git a/clang/test/Analysis/scopes-cfg-output.cpp b/clang/test/Analysis/scopes-cfg-output.cpp
+index 6877d124e67a..4eb8967e3735 100644
+--- a/clang/test/Analysis/scopes-cfg-output.cpp
++++ b/clang/test/Analysis/scopes-cfg-output.cpp
+@@ -1419,3 +1419,68 @@ label:
+     }
+   }
+ }
++
++// CHECK:      [B1]
++// CHECK-NEXT:   1: CFGScopeBegin(i)
++// CHECK-NEXT:   2: int i __attribute__((cleanup(cleanup_int)));
++// CHECK-NEXT:   3: CleanupFunction (cleanup_int)
++// CHECK-NEXT:   4: CFGScopeEnd(i)
++void cleanup_int(int *i);
++void test_cleanup_functions() {
++  int i __attribute__((cleanup(cleanup_int)));
++}
++
++// CHECK:      [B1]
++// CHECK-NEXT:    1: 10
++// CHECK-NEXT:    2: i
++// CHECK-NEXT:    3: [B1.2] = [B1.1]
++// CHECK-NEXT:    4: return;
++// CHECK-NEXT:    5: CleanupFunction (cleanup_int)
++// CHECK-NEXT:    6: CFGScopeEnd(i)
++// CHECK-NEXT:    Preds (1): B3
++// CHECK-NEXT:    Succs (1): B0
++// CHECK:      [B2]
++// CHECK-NEXT:    1: return;
++// CHECK-NEXT:    2: CleanupFunction (cleanup_int)
++// CHECK-NEXT:    3: CFGScopeEnd(i)
++// CHECK-NEXT:    Preds (1): B3
++// CHECK-NEXT:    Succs (1): B0
++// CHECK:      [B3]
++// CHECK-NEXT:    1: CFGScopeBegin(i)
++// CHECK-NEXT:    2: int i __attribute__((cleanup(cleanup_int)));
++// CHECK-NEXT:    3: m
++// CHECK-NEXT:    4: [B3.3] (ImplicitCastExpr, LValueToRValue, int)
++// CHECK-NEXT:    5: 1
++// CHECK-NEXT:    6: [B3.4] == [B3.5]
++// CHECK-NEXT:    T: if [B3.6]
++// CHECK-NEXT:    Preds (1): B4
++// CHECK-NEXT:    Succs (2): B2 B1
++void test_cleanup_functions2(int m) {
++  int i __attribute__((cleanup(cleanup_int)));
++
++  if (m == 1) {
++    return;
++  }
++
++  i = 10;
++  return;
++}
++
++// CHECK:       [B1]
++// CHECK-NEXT:    1: CFGScopeBegin(f)
++// CHECK-NEXT:    2:  (CXXConstructExpr, [B1.3], F)
++// CHECK-NEXT:    3: F f __attribute__((cleanup(cleanup_F)));
++// CHECK-NEXT:    4: CleanupFunction (cleanup_F)
++// CHECK-NEXT:    5: [B1.3].~F() (Implicit destructor)
++// CHECK-NEXT:    6: CFGScopeEnd(f)
++// CHECK-NEXT:    Preds (1): B2
++// CHECK-NEXT:    Succs (1): B0
++class F {
++public:
++  ~F();
++};
++void cleanup_F(F *f);
++
++void test() {
++  F f __attribute((cleanup(cleanup_F)));
++}

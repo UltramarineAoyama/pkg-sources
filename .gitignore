@@ -1,0 +1,4 @@
+anda-build/
+*.tar.*
+*.zip
+*.rpm

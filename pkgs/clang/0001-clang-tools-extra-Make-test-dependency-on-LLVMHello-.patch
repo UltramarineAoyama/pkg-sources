@@ -1,0 +1,85 @@
+From 22d62b32cd3be5fb0ae10723b35a781e0f862b71 Mon Sep 17 00:00:00 2001
+From: Tom Stellard <tstellar@redhat.com>
+Date: Tue, 24 Jan 2023 22:46:25 +0000
+Subject: [PATCH] clang-tools-extra: Make test dependency on LLVMHello optional
+
+This fixes clang + clang-tools-extra standalone build after
+36892727e4f19a60778e371d78f8fb09d8122c85.
+---
+ clang-tools-extra/test/CMakeLists.txt                  | 10 +++++++++-
+ clang-tools-extra/test/clang-tidy/CTTestTidyModule.cpp |  2 +-
+ clang-tools-extra/test/lit.cfg.py                      |  3 +++
+ clang-tools-extra/test/lit.site.cfg.py.in              |  1 +
+ 4 files changed, 14 insertions(+), 2 deletions(-)
+
+diff --git a/clang-tools-extra/test/CMakeLists.txt b/clang-tools-extra/test/CMakeLists.txt
+index f4c529ee8af2..1cfb4dd529aa 100644
+--- a/clang-tools-extra/test/CMakeLists.txt
++++ b/clang-tools-extra/test/CMakeLists.txt
+@@ -7,10 +7,15 @@
+ set(CLANG_TOOLS_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/..")
+ set(CLANG_TOOLS_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/..")
+ 
++if (TARGET LLVMHello)
++  set (LLVM_HAS_LLVM_HELLO 1)
++endif()
++
+ llvm_canonicalize_cmake_booleans(
+   CLANG_TIDY_ENABLE_STATIC_ANALYZER
+   CLANG_PLUGIN_SUPPORT
+   LLVM_INSTALL_TOOLCHAIN_ONLY
++  LLVM_HAS_LLVM_HELLO
+   )
+ 
+ configure_lit_site_cfg(
+@@ -86,7 +91,10 @@ if (NOT LLVM_INSTALL_TOOLCHAIN_ONLY)
+   endif()
+ 
+   if(TARGET CTTestTidyModule)
+-      list(APPEND CLANG_TOOLS_TEST_DEPS CTTestTidyModule LLVMHello)
++      list(APPEND CLANG_TOOLS_TEST_DEPS CTTestTidyModule)
++      if (TARGET  LLVMHello)
++        list(APPEND CLANG_TOOLS_TEST_DEPS CTTestTidyModule)
++      endif()
+       target_include_directories(CTTestTidyModule PUBLIC BEFORE "${CLANG_TOOLS_SOURCE_DIR}")
+       if(CLANG_PLUGIN_SUPPORT AND (WIN32 OR CYGWIN))
+         set(LLVM_LINK_COMPONENTS
+diff --git a/clang-tools-extra/test/clang-tidy/CTTestTidyModule.cpp b/clang-tools-extra/test/clang-tidy/CTTestTidyModule.cpp
+index c66a94f458cf..b4e7a5d691e5 100644
+--- a/clang-tools-extra/test/clang-tidy/CTTestTidyModule.cpp
++++ b/clang-tools-extra/test/clang-tidy/CTTestTidyModule.cpp
+@@ -1,4 +1,4 @@
+-// REQUIRES: plugins
++// REQUIRES: plugins, llvm-hello
+ // RUN: clang-tidy -checks='-*,mytest*' --list-checks -load %llvmshlibdir/CTTestTidyModule%pluginext -load %llvmshlibdir/LLVMHello%pluginext | FileCheck --check-prefix=CHECK-LIST %s
+ // CHECK-LIST: Enabled checks:
+ // CHECK-LIST-NEXT:    mytest1
+diff --git a/clang-tools-extra/test/lit.cfg.py b/clang-tools-extra/test/lit.cfg.py
+index 9f64fd3d2ffa..1b258a00ddf9 100644
+--- a/clang-tools-extra/test/lit.cfg.py
++++ b/clang-tools-extra/test/lit.cfg.py
+@@ -75,6 +75,9 @@ config.substitutions.append(("%clang_tidy_headers", clang_tidy_headers))
+ if config.has_plugins and config.llvm_plugin_ext:
+     config.available_features.add("plugins")
+ 
++if config.has_llvm_hello:
++    config.available_features.add("llvm-hello")
++
+ # It is not realistically possible to account for all options that could
+ # possibly be present in system and user configuration files, so disable
+ # default configs for the test runs.
+diff --git a/clang-tools-extra/test/lit.site.cfg.py.in b/clang-tools-extra/test/lit.site.cfg.py.in
+index 4eb830a1baf1..6e5559348454 100644
+--- a/clang-tools-extra/test/lit.site.cfg.py.in
++++ b/clang-tools-extra/test/lit.site.cfg.py.in
+@@ -11,6 +11,7 @@ config.target_triple = "@LLVM_TARGET_TRIPLE@"
+ config.host_triple = "@LLVM_HOST_TRIPLE@"
+ config.clang_tidy_staticanalyzer = @CLANG_TIDY_ENABLE_STATIC_ANALYZER@
+ config.has_plugins = @CLANG_PLUGIN_SUPPORT@ & ~@LLVM_INSTALL_TOOLCHAIN_ONLY@
++config.has_llvm_hello = @LLVM_HAS_LLVM_HELLO@
+ # Support substitution of the tools and libs dirs with user parameters. This is
+ # used when we can't determine the tool dir at configuration time.
+ config.llvm_tools_dir = lit_config.substitute("@LLVM_TOOLS_DIR@")
+-- 
+2.40.1
+

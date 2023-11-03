@@ -1,0 +1,6 @@
+# clang needs libstdc++-devel installed in order to compile c++ programs.
+addFilter("E: devel-dependency libstdc\+\+-devel")
+addFilter("E: explicit-lib-dependency libstdc\+\+-devel")
+# clang installs libear to /usr/lib on all arches, so we have to use
+# a hard-coded /usr/lib path in order to move it to the python3 sitelib.
+addFilter("E: hardcoded-library-path in %{_prefix}/lib/{libear")
