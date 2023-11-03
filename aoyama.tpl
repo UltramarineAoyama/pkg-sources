@@ -9,6 +9,9 @@ config_opts['buildroot_pkgs'] = 'ultramarine-release ultramarine-release-basic'
 config_opts['package_manager'] = 'dnf'
 config_opts['extra_chroot_dirs'] = [ '/run/lock', ]
 config_opts['mirrored'] = config_opts['target_arch'] != 'i686'
+config_opts['plugin_conf']['ccache_enable'] = True
+config_opts['plugin_conf']['ccache_opts']['max_size'] = '10G'
+config_opts['plugin_conf']['ccache_opts']['dir'] = "%(cache_topdir)s/%(root)s/ccache/u%(chrootuid)s/"
 # repos
 config_opts['dnf.conf'] = """
 

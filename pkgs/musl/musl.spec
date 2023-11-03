@@ -6,7 +6,7 @@
 # This switch changes it to multiarch, with /usr/lib/[arch]-linux-musl
 # This switch only has effect if system_libc is disabled.
 # This switch is disabled by default.
-%bcond_with multiarch
+%bcond_without multiarch
 
 # Fedora uses glibc as the standard libc.
 # This means any packages that would use musl would be treated
@@ -281,11 +281,7 @@ EOF
 %files libc
 %license COPYRIGHT
 /lib/ld-musl-%{_musl_target_cpu}.so.1
-%if %{without multiarch}
-%if "%{_lib}" == "lib64"
 %{_syslibdir}/ld-musl-%{_musl_target_cpu}.so.1
-%endif
-%endif
 %{_libdir}/ld-musl-%{_musl_target_cpu}.so.1
 %config(noreplace) %{_sysconfdir}/ld-musl-%{_musl_target_cpu}.path
 
