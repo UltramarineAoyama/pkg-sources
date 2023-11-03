@@ -270,6 +270,7 @@ ln -sr %{buildroot}/lib/ld-musl-%{_musl_target_cpu}.so.1 %{buildroot}%{_syslibdi
 %endif
 %endif
 
+
 mkdir -p %{buildroot}%{_rpmconfigdir}/macros.d
 touch %{buildroot}%{_rpmconfigdir}/macros.d/macros.musl
 cat > %{buildroot}%{_rpmconfigdir}/macros.d/macros.musl <<EOF
