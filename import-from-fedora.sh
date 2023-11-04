@@ -31,7 +31,7 @@ if [ -d "$CLONE_DEST" ]; then
 fi
 
 clone_and_clean() {
-    git clone "$FEDORA_GIT/$1" "$CLONE_DEST"
+    git clone "$FEDORA_GIT/$1" "$CLONE_DEST" --depth 0
     rm -rf "$CLONE_DEST/.git"
 
     # heredoc create $CLONE_DEST/anda.hcl
