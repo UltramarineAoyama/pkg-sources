@@ -8,7 +8,6 @@ config_opts['macros']['%toolchain'] = 'clang'
 config_opts['macros']['%optflags'] = '-fuse-ld=musl-clang %optflags'
 config_opts['macros']['%__global_ldflags'] = '-fuse-ld=musl-clang %__global_ldflags'
 config_opts['chroot_setup_cmd'] = 'install @buildsys-build musl-devel musl-libc musl-clang'
-config_opts['chroot_setup_cmd'] += ' @buildsys-build clang llvm llvm-devel llvm-static llvm-libs'
 config_opts['buildroot_pkgs'] = 'ultramarine-release ultramarine-release-basic'
 config_opts['package_manager'] = 'dnf'
 config_opts['extra_chroot_dirs'] = [ '/run/lock', ]
