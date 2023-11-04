@@ -24,7 +24,7 @@
 
 # Bootstrap may be needed to break circular dependencies with cryptsetup,
 # e.g. when re-building cryptsetup on a json-c SONAME-bump.
-%bcond bootstrap 0
+%bcond bootstrap 1
 %bcond tests     1
 %bcond lto       1
 

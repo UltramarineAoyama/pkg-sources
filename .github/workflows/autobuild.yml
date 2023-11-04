@@ -32,12 +32,11 @@ jobs:
     strategy:
       matrix:
         pkg: ${{ fromJson(needs.manifest.outputs.build_matrix) }}
-        version: ["38"]
       fail-fast: false
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/terrapkg/builder:f38
-      options: --cap-add=SYS_ADMIN --privileged
+      options: --cap-add=SYS_ADMIN --privileged -v /dev:/dev
     steps:
       - name: Checkout
         uses: actions/checkout@v3
